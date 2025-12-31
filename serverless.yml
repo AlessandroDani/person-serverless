@@ -4,6 +4,30 @@ provider:
   name: aws
   region: us-east-2
   stage: dev
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:Scan
+          Resource: !GetAtt UsersTable.Arn
+
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource: !GetAtt UserRegistrationQueue.Arn
+
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource: !Ref UserNotificationTopic
 
 functions:
   getUsers:
@@ -16,6 +40,8 @@ functions:
   postUsers:
     handler: handler.postUsers
     runtime: nodejs18.x
+    environment:
+      SQS_URL: !Ref UserRegistrationQueue
     events:
       - http:
           path: users
@@ -38,6 +64,8 @@ functions:
   emailWorker:
     handler: handler.sendEmailWorker
     runtime: nodejs18.x
+    environment:
+      SNS_TOPIC_ARN: !Ref UserNotificationTopic
     events:
       - sqs:
           arn: !GetAtt UserRegistrationQueue.Arn
@@ -57,24 +85,6 @@ resources:
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST 
 
-    LambdaDynamoDBRole:
-      Type: AWS::IAM::Policy
-      Properties:
-        PolicyName: LambdaDynamoDBPolicy
-        PolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:PutItem
-                - dynamodb:GetItem
-                - dynamodb:UpdateItem
-                - dynamodb:DeleteItem
-                - dynamodb:Scan
-              Resource: !GetAtt UsersTable.Arn
-        Roles:
-          - !Ref IamRoleLambdaExecution
-
     UserRegistrationQueue:
       Type: AWS::SQS::Queue
       Properties:
@@ -85,31 +95,3 @@ resources:
       Type: AWS::SNS::Topic
       Properties:
         TopicName: UserNotificationTopic
-
-    QueuePolicy:
-      Type: AWS::SQS::QueuePolicy
-      Properties:
-        Queues:
-          - !Ref UserRegistrationQueue
-        PolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service: "lambda.amazonaws.com"
-              Action: "sqs:SendMessage"
-              Resource: !GetAtt UserRegistrationQueue.Arn
-
-    SNSTopicPolicy:
-      Type: AWS::SNS::TopicPolicy
-      Properties:
-        Topics:
-          - !Ref UserNotificationTopic
-        PolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service: "lambda.amazonaws.com"
-              Action: "sns:Publish"
-              Resource: !Ref UserNotificationTopic
