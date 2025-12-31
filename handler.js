@@ -4,6 +4,10 @@ const { randomUUID } = require("crypto");
 const client = new DynamoDBClient({region: "us-east-2"});
 const docClient = DynamoDBDocumentClient.from(client);
 
+const AWS = require('aws-sdk');
+const sqs = new AWS.SQS();
+const sns = new AWS.SNS();
+
 const TABLE_NAME = "UsersTable";
 
 module.exports.getUsers = async (event) => {
@@ -57,11 +61,16 @@ module.exports.postUsers = async (event) => {
 
         await docClient.send(command);
 
+        await sqs.sendMessage({
+            QueueUrl: process.env.USER_REGISTRATION_QUEUE_URL,
+            MessageBody: JSON.stringify(newUser),
+        }).promise();
+
         return {
             statusCode: 201,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                message: "Usuario guardado exitosamente en DynamoDB",
+                message: "Usuario creado y encolado exitosamente",
                 technology: "NodeJs",
                 method: "POST",
                 user: newUser,
@@ -73,4 +82,7 @@ module.exports.postUsers = async (event) => {
             body: JSON.stringify({ error: "Error al guardar en DynamoDB", details: error.message }),
         };
     }
+
+    module.exports.sendEmailWorker = async (event) => {
+
 };
