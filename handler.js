@@ -62,7 +62,7 @@ module.exports.postUsers = async (event) => {
         await docClient.send(command);
 
         await sqs.sendMessage({
-            QueueUrl: process.env.USER_REGISTRATION_QUEUE_URL,
+            QueueUrl: process.env.SQS_URL,
             MessageBody: JSON.stringify(newUser),
         }).promise();
 
@@ -82,7 +82,20 @@ module.exports.postUsers = async (event) => {
             body: JSON.stringify({ error: "Error al guardar en DynamoDB", details: error.message }),
         };
     }
+}
 
     module.exports.sendEmailWorker = async (event) => {
+        for (const record of event.Records) {
+        const userData = JSON.parse(record.body);
+        
+        console.log("Procesando mensaje de SQS para:", userData.email);
 
-};
+        const params = {
+            Message: `Bienvenido ${userData.name}, tu cuenta ha sido creada exitosamente.`,
+            Subject: "Registro Exitoso",
+            TopicArn: process.env.SNS_TOPIC_ARN
+        };
+
+        await sns.publish(params).promise();
+    }
+}
