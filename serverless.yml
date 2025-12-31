@@ -34,6 +34,14 @@ functions:
       - http:
           path: users/{id}
           method: delete
+    
+  emailWorker:
+    handler: handler.sendEmailWorker
+    runtime: nodejs18.x
+    events:
+      - sqs:
+          arn: !GetAtt UserRegistrationQueue.Arn
+          batchSize: 1
 
 resources:
   Resources:
@@ -66,3 +74,42 @@ resources:
               Resource: !GetAtt UsersTable.Arn
         Roles:
           - !Ref IamRoleLambdaExecution
+
+    UserRegistrationQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: UserRegistrationQueue
+        VisibilityTimeout: 30
+    
+    UserNotificationTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: UserNotificationTopic
+
+    QueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref UserRegistrationQueue
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: "lambda.amazonaws.com"
+              Action: "sqs:SendMessage"
+              Resource: !GetAtt UserRegistrationQueue.Arn
+
+    SNSTopicPolicy:
+      Type: AWS::SNS::TopicPolicy
+      Properties:
+        Topics:
+          - !Ref UserNotificationTopic
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: "lambda.amazonaws.com"
+              Action: "sns:Publish"
+              Resource: !Ref UserNotificationTopic
