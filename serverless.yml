@@ -1,0 +1,68 @@
+service: pragma-user-service
+
+provider:
+  name: aws
+  region: us-east-2
+  stage: dev
+
+functions:
+  getUsers:
+    handler: handler.getUsers
+    runtime: nodejs18.x
+    events:
+      - http:
+          path: users
+          method: get
+  postUsers:
+    handler: handler.postUsers
+    runtime: nodejs18.x
+    events:
+      - http:
+          path: users
+          method: post
+
+  javaHandler:
+    handler: com.example.deploy.handler.StreamLambdaHandler
+    runtime: java17
+    timeout: 29
+    package:
+      artifact: ../deploy/build/libs/final-build-v1.jar
+    events:
+      - http:
+          path: users
+          method: put
+      - http:
+          path: users/{id}
+          method: delete
+
+resources:
+  Resources:
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: UsersTable
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST 
+
+    LambdaDynamoDBRole:
+      Type: AWS::IAM::Policy
+      Properties:
+        PolicyName: LambdaDynamoDBPolicy
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Scan
+              Resource: !GetAtt UsersTable.Arn
+        Roles:
+          - !Ref IamRoleLambdaExecution
