@@ -32,7 +32,7 @@ provider:
 functions:
   getUsers:
     handler: handler.getUsers
-    runtime: nodejs18.x
+    runtime: nodejs20.x
     events:
       - http:
           path: users
@@ -63,7 +63,7 @@ functions:
     
   emailWorker:
     handler: handler.sendEmailWorker
-    runtime: nodejs18.x
+    runtime: nodejs20.x
     environment:
       SNS_TOPIC_ARN: !Ref UserNotificationTopic
     events:
