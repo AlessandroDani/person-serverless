@@ -8,7 +8,7 @@ const AWS = require('aws-sdk');
 const sqs = new AWS.SQS();
 const sns = new AWS.SNS();
 
-const TABLE_NAME = "UsersTable";
+const TABLE_NAME = process.env.TABLE_NAME;
 
 module.exports.getUsers = async (event) => {
     try {
