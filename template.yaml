@@ -1,0 +1,251 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'IaC para Usuarios CRUD completo con Lambdas separadas (HU 7, 8, 9, 12)'
+
+Resources:
+  UsersTableCF:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: UsersTable
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  RegistrationQueueCF:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: UserRegistrationQueue-CF
+
+  NotificationTopicCF:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: UserNotificationTopic-CF
+  
+  MyEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref NotificationTopicCF
+      Protocol: email
+      Endpoint: alessandrodaniele07@gmail.com
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - sqs:SendMessage
+                  - sns:Publish
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  PostUserLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: PostUser-CF
+      Handler: handler.postUsers
+      Runtime: nodejs20.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: alessandro-deploy-bucket-reto
+        S3Key: bucket.zip
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref UsersTableCF
+          SQS_URL: !Ref RegistrationQueueCF
+
+  GetUsersLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: GetUsers-CF
+      Handler: handler.getUsers 
+      Runtime: nodejs20.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: alessandro-deploy-bucket-reto
+        S3Key: bucket.zip
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref UsersTableCF
+
+  JavaHandlerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: JavaHandler-CF
+      Handler: com.example.deploy.handler.StreamLambdaHandler
+      Runtime: java17
+      Timeout: 29
+      MemorySize: 512
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: alessandro-deploy-bucket-reto
+        S3Key: final-build-v1.jar 
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref UsersTableCF
+  
+  EmailWorkerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: EmailWorker-CF
+      Handler: handler.sendEmailWorker
+      Runtime: nodejs20.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: alessandro-deploy-bucket-reto
+        S3Key: bucket.zip 
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref NotificationTopicCF
+
+  SQSEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 10
+      EventSourceArn: !GetAtt RegistrationQueueCF.Arn
+      FunctionName: !Ref EmailWorkerLambda
+      Enabled: true
+
+  LambdaSQSPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: LambdaSQSPolicy
+      Roles:
+        - !Ref LambdaExecutionRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Resource: !GetAtt RegistrationQueueCF.Arn
+
+  MyApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: UsersAPI-CF
+
+  UsersResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt MyApiGateway.RootResourceId
+      PathPart: users
+      RestApiId: !Ref MyApiGateway
+
+  UserItemResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref UsersResource
+      PathPart: '{id}'
+      RestApiId: !Ref MyApiGateway
+
+  PostUsersMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      ResourceId: !Ref UsersResource
+      RestApiId: !Ref MyApiGateway
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PostUserLambda.Arn}/invocations"
+
+  GetUsersMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      ResourceId: !Ref UsersResource
+      RestApiId: !Ref MyApiGateway
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetUsersLambda.Arn}/invocations"
+
+  UpdateUserMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: PUT
+      ResourceId: !Ref UsersResource
+      RestApiId: !Ref MyApiGateway
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${JavaHandlerLambda.Arn}/invocations"
+
+  DeleteUserMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: DELETE
+      ResourceId: !Ref UserItemResource
+      RestApiId: !Ref MyApiGateway
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${JavaHandlerLambda.Arn}/invocations"
+
+  ApiDeploymentV4:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: 
+      - PostUsersMethod
+      - GetUsersMethod
+      - UpdateUserMethod
+      - DeleteUserMethod
+    Properties:
+      RestApiId: !Ref MyApiGateway
+      StageName: prod
+
+  PermissionForPost:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PostUserLambda
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MyApiGateway}/*/*"
+
+  PermissionForGet:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetUsersLambda
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MyApiGateway}/*/*"
+  
+  PermissionForJava:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref JavaHandlerLambda
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MyApiGateway}/*/*/*"
+
+Outputs:
+  ApiUrl:
+    Description: "URL base del API"
+    Value: !Sub "https://${MyApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/users"
